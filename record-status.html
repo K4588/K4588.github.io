@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>응답 기록 상태 · 데이터마일 키오스크</title>
+<style>
+  :root { --ink:#0c2f5c; --muted:#5a7388; --line:#d7e3ef; --blue:#2f73d6; --ok:#1f9d5c; --warn:#d9480f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Pretendard, "Noto Sans KR", "Malgun Gothic", sans-serif; background:#eef4fa; color:var(--ink); }
+  main { max-width: 900px; margin: 0 auto; padding: 40px 28px 60px; }
+  h1 { font-size: 40px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 20px; margin: 0 0 28px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:24px; padding:26px 28px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  .stat { background:#f5f9fd; border-radius:18px; padding:18px 20px; }
+  .stat span { display:block; color:var(--muted); font-size:18px; margin-bottom:6px; }
+  .stat b { font-size:40px; }
+  .row { display:flex; justify-content:space-between; gap:16px; font-size:20px; padding:10px 0; border-bottom:1px solid #eef2f6; }
+  .row:last-child { border-bottom:0; }
+  .row em { font-style:normal; color:var(--muted); }
+  .ok { color: var(--ok); font-weight:700; } .warn { color: var(--warn); font-weight:700; }
+  button { font: inherit; font-size: 22px; font-weight: 800; border: 0; border-radius: 18px; padding: 20px 22px; cursor: pointer; background: var(--blue); color:#fff; width:100%; }
+  button.ghost { background:#fff; color: var(--blue); border:2px solid #bcd3ef; }
+  .btns { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  input { font: inherit; font-size: 22px; padding: 16px 18px; border-radius: 14px; border: 2px solid var(--line); width:100%; }
+  .name { display:grid; grid-template-columns: 1fr 180px; gap:12px; }
+  #msg { min-height: 30px; font-size: 20px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>응답 기록 상태</h1>
+  <p class="sub">이 화면은 관리자용입니다. 체험 화면은 <a href="/data">/data</a> 에서 열립니다.</p>
+
+  <section class="card">
+    <div class="grid">
+      <div class="stat"><span>이 기기에서 기록한 체험</span><b id="recorded">-</b></div>
+      <div class="stat"><span>시트 저장 확인</span><b id="confirmed">-</b></div>
+      <div class="stat"><span>전송 대기 중</span><b id="pending">-</b></div>
+      <div class="stat"><span>시트 전체 응답 수</span><b id="sheet">-</b></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row"><em>전송 주소</em><span id="endpoint">-</span></div>
+    <div class="row"><em>마지막 전송 성공</em><span id="lastSent">-</span></div>
+    <div class="row"><em>마지막 오류</em><span id="lastError">-</span></div>
+    <div class="row"><em>기기 보관본</em><span id="archived">-</span></div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="border:0;padding-top:0"><em>키오스크 이름 (시트의 '키오스크' 열)</em></div>
+    <div class="name"><input id="kiosk" /><button id="saveName">저장</button></div>
+  </section>
+
+  <section class="card">
+    <div class="btns">
+      <button id="flush">지금 전송</button>
+      <button id="test" class="ghost">연결 테스트 보내기</button>
+      <button id="resend" class="ghost">보관본 모두 다시 보내기</button>
+      <button id="back" class="ghost">체험 화면으로</button>
+    </div>
+    <div id="msg"></div>
+  </section>
+</main>
+<script src="/config.js"></script>
+<script src="/recorder.js"></script>
+<script>
+(function () {
+  var R = window.__gmRecorder;
+  function $(id) { return document.getElementById(id); }
+  function msg(t, cls) { var m = $("msg"); m.textContent = t; m.className = cls || ""; }
+  function render() {
+    var s = R.stats();
+    $("recorded").textContent = s.recorded || 0;
+    $("confirmed").textContent = s.confirmed || 0;
+    $("pending").textContent = R.pending();
+    $("archived").textContent = R.archived() + "건";
+    var ep = R.config.endpoint;
+    $("endpoint").innerHTML = ep ? '<span class="ok">설정됨</span> ' + ep.replace(/^(https:\/\/script\.google\.com\/macros\/s\/.{6}).*(.{6}\/exec)$/, "$1…$2") : '<span class="warn">미설정 (config.js)</span>';
+    $("lastSent").textContent = s.lastSentAt || "-";
+    $("lastError").innerHTML = s.lastError ? '<span class="warn">' + s.lastError.replace(/</g, "&lt;") + "</span> (" + (s.lastErrorAt || "") + ")" : '<span class="ok">없음</span>';
+    if (document.activeElement !== $("kiosk")) $("kiosk").value = R.kioskName();
+  }
+  function sheetCount() {
+    if (!R.config.endpoint) { $("sheet").textContent = "-"; return; }
+    R.sheetCount().then(function (d) { $("sheet").textContent = d && d.ok ? d.rows : "?"; })
+      .catch(function () { $("sheet").textContent = "확인 불가"; });
+  }
+  function after(p, okText) {
+    msg("처리 중…");
+    p.then(function (r) {
+      render(); sheetCount();
+      if (r && r.error) msg(r.error, "warn");
+      else if (r && r.skipped) msg("전송 주소가 설정되지 않았습니다. config.js 를 확인해 주세요.", "warn");
+      else msg(okText, "ok");
+    });
+  }
+  $("flush").onclick = function () { after(R.flush(), "전송 완료"); };
+  $("test").onclick = function () { after(R.sendTest(), "테스트 기록이 시트에 저장됐습니다 ('테스트 여부' 열 = 테스트)"); };
+  $("resend").onclick = function () { after(R.resendArchive(), "보관본 재전송 완료 (이미 있던 기록은 중복 저장되지 않습니다)"); };
+  $("back").onclick = function () { location.href = "/data"; };
+  $("saveName").onclick = function () { var v = $("kiosk").value.trim(); if (v) { R.setKioskName(v); msg("키오스크 이름을 '" + v + "'(으)로 저장했습니다.", "ok"); render(); } };
+  render(); sheetCount();
+  setInterval(render, 3000);
+})();
+</script>
+</body>
+</html>
